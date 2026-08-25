@@ -57,7 +57,7 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
 
 REQUIRED_KEYS = ["bhk", "property_type", "locality", "area_sqft"]
 ALL_KEYS = ["headline", "description", "tags"] + REQUIRED_KEYS
-AMENITY_TAG_PATTERNS = [
+AMENITY_TAG_PATTERNS = [    
     ("Gym", [r"\bgym\b", r"\bgymnasium\b"]),
     ("Parking", [r"\bparking\b", r"\bparking\s*lot\b", r"\bcar\s*park(?:ing)?\b"]),
     ("Swimming Pool", [r"\bswimming\s*pool\b", r"\bpool\b"]),
@@ -126,9 +126,12 @@ async def call_gemini(raw_text: str) -> str:
 
 
 async def call_stub(raw_text: str) -> str:
-    """Fallback used when no GEMINI_API_KEY is set. Waits ~1s like a real API call would,
-    then returns a hardcoded response in the correct shape, doing a naive keyword-based
-    extraction so the 'don't invent data' behavior is still demonstrably correct."""
+    """Fallback used when Gemini is unavailable.
+
+    Waits ~1s like a real API call would, then returns a hardcoded response in the
+    correct shape, doing a naive keyword-based extraction so the 'don't invent data'
+    behavior is still demonstrably correct.
+    """
     await asyncio.sleep(1)
 
     text_lower = raw_text.lower()
@@ -150,7 +153,7 @@ async def call_stub(raw_text: str) -> str:
     locality = None  # Deliberately not guessed — stub has no reliable way to detect this.
 
     result = {
-        "headline": "Property listing (stub mode — no AI key configured)",
+        "headline": "Property listing (fallback mode — Gemini unavailable)",
         "description": raw_text.strip().capitalize() + ".",
         "tags": ["property", "listing", "stub-mode"],
         "bhk": bhk,

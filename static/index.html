@@ -3,6 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="propagent-api-base" content="https://propagent-aryan.onrender.com" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230d8a56'/%3E%3Ctext x='50%25' y='56%25' dominant-baseline='middle' text-anchor='middle' font-family='Arial' font-size='30' fill='white'%3EPA%3C/text%3E%3C/svg%3E" />
   <title>propAgent Listing Assistant</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -513,6 +515,25 @@
     const modePill = document.getElementById('modePill');
 
     const recentItems = [];
+    const apiBaseMeta = document.querySelector('meta[name="propagent-api-base"]');
+    const API_BASE = (apiBaseMeta && apiBaseMeta.content ? apiBaseMeta.content : '').replace(/\/$/, '');
+
+    function apiUrl(path) {
+      return API_BASE ? `${API_BASE}${path}` : path;
+    }
+
+    async function readResponsePayload(res) {
+      const raw = await res.text();
+      if (!raw) {
+        return null;
+      }
+
+      try {
+        return JSON.parse(raw);
+      } catch (_) {
+        return { non_json_body: raw };
+      }
+    }
 
     function escapeHtml(text) {
       return String(text)
@@ -582,6 +603,7 @@
       const tags = Array.isArray(data.tags) ? data.tags : [];
       const missing = Array.isArray(data.missing_fields) ? data.missing_fields : [];
       const needsMore = Boolean(data.needs_more_info);
+      const fallbackReason = typeof data.fallback_reason === 'string' ? data.fallback_reason : '';
       const amenities = extractAmenities(tags);
       const amenitiesText = amenities.length ? amenities.join(', ') : 'Not provided';
 
@@ -594,6 +616,9 @@
         : '<span class="missing-pill">None</span>';
 
       const completeness = 4 - missing.length;
+      const fallbackNote = fallbackReason
+        ? `<p style="margin:10px 0 0; color:#9a571a; font-weight:600;">Fallback mode active: ${escapeHtml(fallbackReason)}</p>`
+        : '';
 
       return `
         <h3 style="margin:0; font-family:Sora, sans-serif; font-size:1.08rem;">${escapeHtml(toDisplay(data.headline))}</h3>
@@ -615,6 +640,7 @@
 
         <div class="missing-row">${missingHtml}</div>
 
+        ${fallbackNote}
         ${needsMore ? '<p style="margin:10px 0 0; color:#9a571a; font-weight:600;">Needs more details to complete extraction.</p>' : ''}
 
         <details>
@@ -639,10 +665,16 @@
 
     async function refreshMode() {
       try {
-        const res = await fetch('/api/health');
+        const res = await fetch(apiUrl('/api/health'));
         if (!res.ok) return;
-        const data = await res.json();
-        modePill.textContent = `API Mode: ${data.mode || 'unknown'}`;
+        const data = await readResponsePayload(res);
+        if (!data || typeof data !== 'object') {
+          modePill.textContent = 'API Mode: unavailable';
+          return;
+        }
+        modePill.textContent = API_BASE
+          ? `API Mode: ${data.mode || 'unknown'} (remote)`
+          : `API Mode: ${data.mode || 'unknown'}`;
       } catch (_) {
         modePill.textContent = 'API Mode: unavailable';
       }
@@ -665,21 +697,35 @@
       const loadingBubble = addBubble('assistant', 'Working on cleanup and extraction.', 'Analyzing', 'warn');
 
       try {
-        const res = await fetch('/analyze', {
+        const res = await fetch(apiUrl('/analyze'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ description }),
         });
 
-        const data = await res.json();
+        const data = await readResponsePayload(res);
         console.log('Analyze response:', { status: res.status, ok: res.ok, data });
 
         loadingBubble.remove();
 
         if (!res.ok) {
+          const fallbackBody = data && typeof data === 'object'
+            ? data
+            : { detail: 'Backend returned an error with an empty response body.' };
+
           addBubble(
             'assistant',
-            `<p style="margin:0">Request failed with status ${res.status}.</p><pre>${escapeHtml(JSON.stringify(data, null, 2))}</pre>`,
+            `<p style="margin:0">Request failed with status ${res.status}.</p><pre>${escapeHtml(JSON.stringify(fallbackBody, null, 2))}</pre>`,
+            'Error',
+            'error'
+          );
+          return;
+        }
+
+        if (!data || typeof data !== 'object') {
+          addBubble(
+            'assistant',
+            '<p style="margin:0">Backend response was empty or invalid JSON.</p>',
             'Error',
             'error'
           );
