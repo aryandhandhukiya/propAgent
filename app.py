@@ -231,6 +231,28 @@ def enrich_tags_with_explicit_amenities(raw_text: str, tags: list) -> list:
     return normalized_tags
 
 
+def is_quota_or_billing_error(err: Exception) -> bool:
+    """Detect provider quota/billing failures from exception text."""
+    message = str(err).lower()
+    return any(
+        marker in message
+        for marker in [
+            "quota",
+            "billing",
+            "resource_exhausted",
+            "resource exhausted",
+            "429",
+            "403",
+            "denied access",
+            "permission denied",
+            "forbidden",
+            "invalid api key",
+            "api key not valid",
+            "unauthorized",
+        ]
+    )
+
+
 async def get_ai_response(raw_text: str) -> dict:
     caller = call_gemini if GEMINI_API_KEY else call_stub
 
@@ -245,6 +267,15 @@ async def get_ai_response(raw_text: str) -> dict:
             last_error = e
             continue
         except Exception as e:
+            if caller is call_gemini and is_quota_or_billing_error(e):
+                # Gracefully degrade to stub mode when provider quota/auth access fails.
+                fallback_raw = await call_stub(raw_text)
+                fallback_cleaned = strip_code_fences(fallback_raw)
+                fallback_parsed = json.loads(fallback_cleaned)
+                fallback_result = validate_and_normalize(fallback_parsed)
+                fallback_result["fallback_reason"] = "gemini_unavailable_or_access_denied"
+                return fallback_result
+
             # Keep backend failures as JSON HTTP errors instead of opaque 500s.
             last_error = e
             continue
