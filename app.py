@@ -29,10 +29,25 @@ load_dotenv()
 
 app = FastAPI(title="propOG Listing Cleaner")
 
-# Allow the plain static frontend (or any localhost dev server) to call this API.
+# Allow deployed frontend (Netlify) plus local dev frontends.
+cors_origins = [
+    "https://phenomenal-torte-5cf4d8.netlify.app",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+
+extra_cors_origins = os.environ.get("CORS_ORIGINS")
+if extra_cors_origins:
+    cors_origins.extend(
+        [origin.strip() for origin in extra_cors_origins.split(",") if origin.strip()]
+    )
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=cors_origins,
+    allow_origin_regex=r"https://.*\.netlify\.app",
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -227,6 +242,10 @@ async def get_ai_response(raw_text: str) -> dict:
             parsed = json.loads(cleaned)
             return validate_and_normalize(parsed)
         except (json.JSONDecodeError, ValueError) as e:
+            last_error = e
+            continue
+        except Exception as e:
+            # Keep backend failures as JSON HTTP errors instead of opaque 500s.
             last_error = e
             continue
 
